@@ -75,6 +75,7 @@ static int const RCTVideoUnset = -1;
   BOOL _fullscreenPlayerPresented;
   NSString *_filterName;
   BOOL _filterEnabled;
+  CIImage *_image;
   UIViewController * _presentingViewController;
 #if __has_include(<react-native-video/RCTVideoCache.h>)
   RCTVideoCache * _videoCache;
@@ -1347,30 +1348,69 @@ static int const RCTVideoUnset = -1;
   }
 }
 
-- (void)setFilter:(NSString *)filterName {
-    _filterName = filterName;
+- (void)setImage:(CIImage *)image {
+  _image = image;
+}
 
-    if (!_filterEnabled) {
-        return;
-    } else if ([[_source objectForKey:@"uri"] rangeOfString:@"m3u8"].location != NSNotFound) {
-        return; // filters don't work for HLS... return
-    } else if (!_playerItem.asset) {
-        return;
-    }
-    
-    CIFilter *filter = [CIFilter filterWithName:filterName];
-    _playerItem.videoComposition = [AVVideoComposition
-                                    videoCompositionWithAsset:_playerItem.asset
-                                    applyingCIFiltersWithHandler:^(AVAsynchronousCIImageFilteringRequest *_Nonnull request) {
-        if (filter == nil) {
-            [request finishWithImage:request.sourceImage context:nil];
-        } else {
-            CIImage *image = request.sourceImage.imageByClampingToExtent;
-            [filter setValue:image forKey:kCIInputImageKey];
-            CIImage *output = [filter.outputImage imageByCroppingToRect:request.sourceImage.extent];
-            [request finishWithImage:output context:nil];
-        }
-    }];
+- (NSString*)getFilter {
+  return _filterName;
+}
+
+- (void)setFilter:(NSString *)filterName {
+  _filterName = filterName;
+
+  if (!_filterEnabled) {
+    return;
+  } else if ([[_source objectForKey:@"uri"] rangeOfString:@"m3u8"].location != NSNotFound) {
+    return; // filters don't work for HLS... return
+  } else if (!_playerItem.asset) {
+    return;
+  }
+
+  CIFilter *filter = [CIFilter filterWithName:filterName];
+  _playerItem.videoComposition = [AVVideoComposition
+          videoCompositionWithAsset:_playerItem.asset
+       applyingCIFiltersWithHandler:^(AVAsynchronousCIImageFilteringRequest *_Nonnull request) {
+
+           CIImage *output;
+
+           if (filter == nil) {
+
+             output = request.sourceImage;
+
+           } else {
+
+             CIImage *image = request.sourceImage.imageByClampingToExtent;
+
+             [filter setValue:image forKey:kCIInputImageKey];
+
+             output = [filter.outputImage imageByCroppingToRect:request.sourceImage.extent];
+
+           }
+
+           CIImage *composite;
+
+           if (_image != nil) {
+
+             CGFloat scale = request.sourceImage.extent.size.width / _image.extent.size.width;
+             CGFloat aspectRatio = 1;
+
+             CIFilter *overlayFilter = [CIFilter filterWithName:@"CILanczosScaleTransform"];
+             [overlayFilter setValue:_image forKey:kCIInputImageKey];
+             [overlayFilter setValue:@(scale) forKey:kCIInputScaleKey];
+             [overlayFilter setValue:@(aspectRatio) forKey:kCIInputAspectRatioKey];
+
+             composite = [overlayFilter.outputImage imageByCompositingOverImage:output];
+
+           } else {
+
+             composite = output;
+
+           }
+
+           [request finishWithImage:composite context:nil];
+
+       }];
 }
 
 - (void)setFilterEnabled:(BOOL)filterEnabled {
@@ -1467,50 +1507,57 @@ static int const RCTVideoUnset = -1;
 
 - (void)save:(NSDictionary *)options resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject {
 
-    AVAsset *asset = _playerItem.asset;
+  AVAsset *asset = _playerItem.asset;
 
-    if (asset != nil) {
+  if (asset != nil) {
 
-        AVAssetExportSession *exportSession = [AVAssetExportSession
-                exportSessionWithAsset:asset presetName:AVAssetExportPresetHighestQuality];
+    AVAssetExportSession *exportSession = [AVAssetExportSession
+            exportSessionWithAsset:asset presetName:AVAssetExportPresetHighestQuality];
 
-        if (exportSession != nil) {
-            NSString *path = nil;
-            NSArray *array = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
-            path = [self generatePathInDirectory:[[self cacheDirectoryPath] stringByAppendingPathComponent:@"Videos"]
-                                   withExtension:@".mp4"];
-            NSURL *url = [NSURL fileURLWithPath:path];
-            exportSession.outputFileType = AVFileTypeMPEG4;
-            exportSession.outputURL = url;
-            exportSession.videoComposition = _playerItem.videoComposition;
-            exportSession.shouldOptimizeForNetworkUse = true;
-            [exportSession exportAsynchronouslyWithCompletionHandler:^{
+    if (exportSession != nil) {
+      NSString *path = nil;
+      NSArray *array = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
+      path = [self generatePathInDirectory:[[self cacheDirectoryPath] stringByAppendingPathComponent:@"Videos"]
+                             withExtension:@".mp4"];
+      NSURL *url = [NSURL fileURLWithPath:path];
+      exportSession.outputFileType = AVFileTypeMPEG4;
+      exportSession.outputURL = url;
+      exportSession.videoComposition = _playerItem.videoComposition;
+      exportSession.shouldOptimizeForNetworkUse = true;
+      [exportSession exportAsynchronouslyWithCompletionHandler:^{
 
-                switch ([exportSession status]) {
-                    case AVAssetExportSessionStatusFailed:
-                        reject(@"ERROR_COULD_NOT_EXPORT_VIDEO", @"Could not export video", exportSession.error);
-                        break;
-                    case AVAssetExportSessionStatusCancelled:
-                        reject(@"ERROR_EXPORT_SESSION_CANCELLED", @"Export session was cancelled", exportSession.error);
-                        break;
-                    default:
-                        resolve(@{@"uri": url.absoluteString});
-                        break;
-                }
+          switch ([exportSession status]) {
+            case AVAssetExportSessionStatusFailed:
+              reject(@"ERROR_COULD_NOT_EXPORT_VIDEO", @"Could not export video", exportSession.error);
+                  break;
+            case AVAssetExportSessionStatusCancelled:
+              reject(@"ERROR_EXPORT_SESSION_CANCELLED", @"Export session was cancelled", exportSession.error);
+                  break;
+            default:
+              resolve(@{@"uri": url.absoluteString});
+                  break;
+          }
 
-            }];
+          _image = nil;
 
-        } else {
-
-            reject(@"ERROR_COULD_NOT_CREATE_EXPORT_SESSION", @"Could not create export session", nil);
-
-        }
+      }];
 
     } else {
 
-        reject(@"ERROR_ASSET_NIL", @"Asset is nil", nil);
+      reject(@"ERROR_COULD_NOT_CREATE_EXPORT_SESSION", @"Could not create export session", nil);
+
+      _image = nil;
 
     }
+
+  } else {
+
+    reject(@"ERROR_ASSET_NIL", @"Asset is nil", nil);
+
+    _image = nil;
+
+  }
+
 }
 
 - (BOOL)ensureDirExistsWithPath:(NSString *)path {

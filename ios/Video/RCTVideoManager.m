@@ -70,11 +70,28 @@ RCT_REMAP_METHOD(save,
         resolver:(RCTPromiseResolveBlock)resolve
         rejecter:(RCTPromiseRejectBlock)reject)
 {
-    [self.bridge.uiManager prependUIBlock:^(__unused RCTUIManager *uiManager, NSDictionary<NSNumber *, RCTVideo *> *viewRegistry) {
+    [self.bridge.uiManager prependUIBlock:^(__unused RCTUIManager *uiManager, NSDictionary<NSNumber *, UIView *> *viewRegistry) {
+
         RCTVideo *view = viewRegistry[reactTag];
+
         if (![view isKindOfClass:[RCTVideo class]]) {
             RCTLogError(@"Invalid view returned from registry, expecting RCTVideo, got: %@", view);
         } else {
+
+            NSNumber *nativeTag = options[@"nativeTag"];
+
+            if (nativeTag != nil) {
+
+                UIView *imageView = viewRegistry[nativeTag];
+
+                UIGraphicsBeginImageContext(imageView.bounds.size);
+                [imageView.layer renderInContext:UIGraphicsGetCurrentContext()];
+                UIImage *image = UIGraphicsGetImageFromCurrentImageContext();
+                UIGraphicsEndImageContext();
+                CIImage *ciImage = [CIImage imageWithCGImage:image.CGImage];
+                [view setImage:ciImage];
+                [view setFilter:[view getFilter]];
+            }
             [view save:options resolve:resolve reject:reject];
         }
     }];

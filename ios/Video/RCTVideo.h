@@ -45,6 +45,12 @@
 
 - (AVPlayerViewController*)createPlayerViewController:(AVPlayer*)player withPlayerItem:(AVPlayerItem*)playerItem;
 
+- (void)setImage:(CIImage *)image;
+
+- (NSString*)getFilter;
+
+- (void)setFilter:(NSString *)filterName;
+
 - (void)save:(NSDictionary *)options resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject;
 
 @end
