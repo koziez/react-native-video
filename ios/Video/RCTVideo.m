@@ -1372,43 +1372,42 @@ static int const RCTVideoUnset = -1;
           videoCompositionWithAsset:_playerItem.asset
        applyingCIFiltersWithHandler:^(AVAsynchronousCIImageFilteringRequest *_Nonnull request) {
 
-           CIImage *output;
+           CIImage *output = request.sourceImage;
 
-           if (filter == nil) {
+           if (filter != nil) {
 
-             output = request.sourceImage;
+               [filter setValue:output.imageByClampingToExtent forKey:kCIInputImageKey];
 
-           } else {
-
-             CIImage *image = request.sourceImage.imageByClampingToExtent;
-
-             [filter setValue:image forKey:kCIInputImageKey];
-
-             output = [filter.outputImage imageByCroppingToRect:request.sourceImage.extent];
+               output = [filter.outputImage imageByCroppingToRect:output.extent];
 
            }
-
-           CIImage *composite;
 
            if (_image != nil) {
 
-             CGFloat scale = request.sourceImage.extent.size.width / _image.extent.size.width;
-             CGFloat aspectRatio = 1;
+               CGFloat scale = MIN(
+                       output.extent.size.width / _image.extent.size.width,
+                       output.extent.size.height / _image.extent.size.height
+               );
+               CGFloat aspectRatio = 1;
 
-             CIFilter *overlayFilter = [CIFilter filterWithName:@"CILanczosScaleTransform"];
-             [overlayFilter setValue:_image forKey:kCIInputImageKey];
-             [overlayFilter setValue:@(scale) forKey:kCIInputScaleKey];
-             [overlayFilter setValue:@(aspectRatio) forKey:kCIInputAspectRatioKey];
+               CIFilter *overlayFilter = [CIFilter filterWithName:@"CILanczosScaleTransform"];
 
-             composite = [overlayFilter.outputImage imageByCompositingOverImage:output];
+               [overlayFilter setValue:_image forKey:kCIInputImageKey];
+               [overlayFilter setValue:@(scale) forKey:kCIInputScaleKey];
+               [overlayFilter setValue:@(aspectRatio) forKey:kCIInputAspectRatioKey];
 
-           } else {
+               CIImage *overlay = overlayFilter.outputImage;
 
-             composite = output;
+               overlay = [overlay imageByApplyingTransform:CGAffineTransformMakeTranslation(
+                       (output.extent.size.width - overlay.extent.size.width) / 2,
+                       (output.extent.size.height - overlay.extent.size.height) / 2
+               )];
+
+               output = [overlay imageByCompositingOverImage:output];
 
            }
 
-           [request finishWithImage:composite context:nil];
+           [request finishWithImage:output context:nil];
 
        }];
 }
